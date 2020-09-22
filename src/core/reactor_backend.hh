@@ -194,6 +194,7 @@ public:
     virtual void reset_preemption_monitor() = 0;
     virtual void request_preemption() = 0;
     virtual void start_handling_signal() = 0;
+    virtual int get_fd() = 0;
 
     virtual pollable_fd_state_ptr make_pollable_fd_state(file_desc fd, pollable_fd::speculation speculate) = 0;
 };
@@ -243,6 +244,7 @@ public:
     virtual void reset_preemption_monitor() override;
     virtual void request_preemption() override;
     virtual void start_handling_signal() override;
+    virtual int get_fd() override;
 
     virtual pollable_fd_state_ptr
     make_pollable_fd_state(file_desc fd, pollable_fd::speculation speculate) override;
@@ -291,6 +293,9 @@ public:
     virtual void reset_preemption_monitor() override;
     virtual void request_preemption() override;
     virtual void start_handling_signal() override;
+    virtual int get_fd() override {
+      return -1;
+    }
 
     virtual pollable_fd_state_ptr
     make_pollable_fd_state(file_desc fd, pollable_fd::speculation speculate) override;
@@ -327,6 +332,7 @@ public:
     virtual future<temporary_buffer<char>> read_some(pollable_fd_state& fd, internal::buffer_allocator* ba) override;
     virtual future<size_t> write_some(net::packet& p) override;
     virtual future<size_t> write_some(pollable_fd_state& fd, const void* buffer, size_t len) override;
+    virtual int get_fd() override;
 
     void enable_timer(steady_clock_type::time_point when);
     virtual pollable_fd_state_ptr

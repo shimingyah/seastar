@@ -82,6 +82,8 @@
 #include <seastar/core/scheduling.hh>
 #include <seastar/core/scheduling_specific.hh>
 #include <seastar/core/smp.hh>
+#include <seastar/core/packet_queue.hh>
+#include <seastar/core/channel.hh>
 #include <seastar/core/internal/io_request.hh>
 #include "internal/pollable_fd.hh"
 #include "internal/poll.hh"
@@ -97,6 +99,8 @@ struct _Unwind_Exception;
 extern "C" int _Unwind_RaiseException(struct _Unwind_Exception *h);
 
 namespace seastar {
+
+extern logger seastar_logger;
 
 using shard_id = unsigned;
 
@@ -187,6 +191,8 @@ private:
 
     class signal_pollfn;
     class batch_flush_pollfn;
+    class packet_queue_pollfn;
+    class smp_alien_pollfn;
     class smp_pollfn;
     class drain_cross_cpu_freelist_pollfn;
     class lowres_timer_pollfn;
@@ -199,6 +205,8 @@ private:
     class execution_stage_pollfn;
     friend signal_pollfn;
     friend batch_flush_pollfn;
+    friend packet_queue_pollfn;
+    friend smp_alien_pollfn;
     friend smp_pollfn;
     friend drain_cross_cpu_freelist_pollfn;
     friend lowres_timer_pollfn;
@@ -321,6 +329,7 @@ private:
     int64_t _last_vruntime = 0;
     task_queue_list _active_task_queues;
     task_queue_list _activating_task_queues;
+    packet_queue* _packet_queue;
     task_queue* _at_destroy_tasks;
     sched_clock::duration _task_quota;
     /// Handler that will be called when there is no task to execute on cpu.
@@ -583,6 +592,12 @@ public:
         }
     }
 
+    packet_queue* get_packet_queue() {
+        return _packet_queue;
+    }
+
+    future<> flush_packet_queue(bool& pollable);
+
     /// Set a handler that will be called when there is no task to execute on cpu.
     /// Handler should do a low priority work.
     /// 
@@ -604,6 +619,8 @@ public:
     shard_id cpu_id() const;
 
     void sleep();
+
+    void maybe_wakeup();
 
     steady_clock_type::duration total_idle_time();
     steady_clock_type::duration total_busy_time();
@@ -756,8 +773,5 @@ inline int hrtimer_signal() {
     // also plays with it.
     return SIGRTMIN;
 }
-
-
-extern logger seastar_logger;
 
 }

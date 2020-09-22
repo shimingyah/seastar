@@ -624,6 +624,10 @@ void reactor_backend_epoll::start_tick() {
     auto sched_ok = pthread_setschedparam(_task_quota_timer_thread.native_handle(), SCHED_FIFO, &sp);
     if (sched_ok != 0 && _r->_id == 0) {
         seastar_logger.warn("Unable to set SCHED_FIFO scheduling policy for timer thread; latency impact possible. Try adding CAP_SYS_NICE");
+	auto ret = nice(-10);
+        if (ret == -1) {
+            seastar_logger.warn("Unable to set CAP_SYS_NICE");
+        }
     }
 }
 
@@ -752,6 +756,10 @@ void reactor_backend_epoll::signal_received(int signo, siginfo_t* siginfo, void*
     } else {
         reactor::signals::failed_to_handle(signo);
     }
+}
+
+int reactor_backend_epoll::get_fd() {
+    return _epollfd.get();
 }
 
 future<> reactor_backend_epoll::get_epoll_future(pollable_fd_state& pfd, int event) {

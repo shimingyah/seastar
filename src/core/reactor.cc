@@ -897,6 +897,7 @@ reactor::reactor(unsigned id, reactor_backend_selector rbs, reactor_config cfg)
      */
     _backend = rbs.create(this);
     *internal::get_scheduling_group_specific_thread_local_data_ptr() = &_scheduling_group_specific_data;
+    _packet_queue = new packet_queue(this);
     _task_queues.push_back(std::make_unique<task_queue>(0, "main", 1000));
     _task_queues.push_back(std::make_unique<task_queue>(1, "atexit", 1000));
     _at_destroy_tasks = _task_queues.back().get();
@@ -927,6 +928,7 @@ reactor::~reactor() {
     auto r = ::pthread_sigmask(SIG_BLOCK, &mask, NULL);
     assert(r == 0);
 
+    delete _packet_queue;
     _backend->stop_tick();
     auto eraser = [](auto& list) {
         while (!list.empty()) {
@@ -1054,7 +1056,8 @@ void cpu_stall_detector::update_config(cpu_stall_detector_config cfg) {
 
 void cpu_stall_detector::maybe_report() {
     if (_reported++ < _max_reports_per_minute) {
-        generate_trace();
+        // generate_trace();
+	std::cerr << "Warning: Heavy task is running" << std::endl;
     }
 }
 // We use a tick at every timer firing so we can report suppressed backtraces.
@@ -1319,6 +1322,7 @@ void reactor::configure(boost::program_options::variables_map vm) {
     _max_task_backlog = vm["max-task-backlog"].as<unsigned>();
     _max_poll_time = vm["idle-poll-time-us"].as<unsigned>() * 1us;
     if (vm.count("poll-mode")) {
+	smp::poll_mode = true;
         _max_poll_time = std::chrono::nanoseconds::max();
     }
     if (vm.count("overprovisioned")
@@ -1365,8 +1369,8 @@ reactor::posix_listen(socket_address sa, listen_options opts) {
     if (opts.reuse_address) {
         fd.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1);
     }
-    if (_reuseport && !sa.is_af_unix())
-        fd.setsockopt(SOL_SOCKET, SO_REUSEPORT, 1);
+    // if (_reuseport && !sa.is_af_unix())
+    fd.setsockopt(SOL_SOCKET, SO_REUSEPORT, 1);
 
     try {
         fd.bind(sa.u.sa, sa.length());
@@ -2014,6 +2018,56 @@ future<> reactor::run_exit_tasks() {
     });
 }
 
+future<> reactor::flush_packet_queue(bool& pollable) {
+    pollable = false;
+
+    user_packet* item = nullptr;
+    if (!_packet_queue->dequeue_bulk(&item)) {
+        return make_ready_future();
+    }
+    channel* chan = item->_channel;
+
+    pollable = true;
+    output_stream<char>* out = chan->get_output_stream();
+	
+    /*
+    return out->write(net::packet(item->_fragments,
+                                  make_deleter(seastar::deleter(), [item](){
+                                      item->_done();
+                                      delete item;
+                                  })
+            )).then([this, out]() {
+    */
+    return out->write(std::move(item->_buf)).then([this, out]() {
+                return out->flush().then([] {
+                    return seastar::make_ready_future<>();
+                });
+            }).then_wrapped([this, out, chan] (auto&& f) {
+                try {
+                    f.get();
+                    return seastar::make_ready_future<>();
+                } catch (...) {
+                    // disconnect when exception
+                    seastar_logger.error("Write error, disconnect the connection.");
+                    chan->set_channel_broken();
+
+                    // ev_del is a param that will be ignored by EPOLL_CTL_DEL
+                    // so the last param in epoll_ctl can be null, but
+                    // in kernel versions before 2.6.9, the EPOLL_CTL_DEL operation required
+                    // a non-null pointer in event, even though this argument is ignored.
+                    // so we use a empty param here.
+                    struct epoll_event ev_del;
+                    if (epoll_ctl(_backend->get_fd(), EPOLL_CTL_DEL, out->get_fd(), &ev_del) < 0) {
+                        seastar_logger.error("Epoll delete fd error.");
+                        return make_ready_future();
+                    }
+                    close(out->get_fd());
+
+                    return make_ready_future();
+                }
+          });
+}
+
 void reactor::stop() {
     assert(_id == 0);
     smp::cleanup_cpu();
@@ -2363,6 +2417,70 @@ public:
     }
 };
 
+// poller for alien queue
+class reactor::smp_alien_pollfn : public reactor::pollfn {
+    reactor& _r;
+public:
+    smp_alien_pollfn(reactor& r) : _r(r) {}
+    virtual bool poll() final override {
+        return alien::smp::poll_queues();
+    }
+    virtual bool pure_poll() final override {
+        return alien::smp::pure_poll_queues();
+    }
+    virtual bool try_enter_interrupt_mode() override {
+        return true;
+    }
+    virtual void exit_interrupt_mode() override final {
+    }
+};
+
+// TODO packet_queue per connection
+class reactor::packet_queue_pollfn final : public reactor::pollfn {
+public:
+    packet_queue_pollfn(reactor& r) : _r(r), _should_poll(true) {
+        start();
+    }
+
+    virtual bool poll() final override {
+        if (_should_poll) {
+            start();
+        }
+        return false;
+    }
+
+    void start() {
+        bool pollable = false;
+        future<> f = do_poll(pollable);
+        if (pollable) {
+            _should_poll = false;
+            f.then([this]() { start(); });
+        } else {
+            _should_poll = true;
+        }
+    }
+
+    virtual bool pure_poll() override final {
+        return poll();
+    }
+
+    virtual bool try_enter_interrupt_mode() override {
+        return true;
+    }
+
+    virtual void exit_interrupt_mode() override final {
+    }
+
+private:
+    future<> do_poll(bool& pollable) {
+        return _r.flush_packet_queue(pollable);
+    }
+
+private:
+    reactor& _r;
+    bool _should_poll;
+};
+
 class reactor::lowres_timer_pollfn final : public reactor::pollfn {
     reactor& _r;
     // A highres timer is implemented as a waking  signal; so
@@ -2647,6 +2765,8 @@ int reactor::run() {
 
     poller batch_flush_poller(std::make_unique<batch_flush_pollfn>(*this));
     poller execution_stage_poller(std::make_unique<execution_stage_pollfn>());
+    poller packet_queue_poller(std::make_unique<packet_queue_pollfn>(*this));
+    poller alien_queue_poller(std::make_unique<smp_alien_pollfn>(*this));
 
     start_aio_eventfd_loop();
 
@@ -2789,6 +2909,26 @@ int reactor::run() {
     // instance, collectd), we will not have any way to guarantee who is destroyed first.
     my_io_queues.clear();
     return _return;
+}
+
+void
+reactor::maybe_wakeup() {
+    // poll-mode no need to check _sleeping.
+    if (smp::poll_mode) {
+        return;
+    }
+
+    // This is read-after-write, which wants memory_order_seq_cst,
+    // but we insert that barrier using systemwide_memory_barrier()
+    // because seq_cst is so expensive.
+    //
+    // However, we do need a compiler barrier:
+    std::atomic_signal_fence(std::memory_order_seq_cst);
+    if (_sleeping.load(std::memory_order_relaxed)) {
+        // We are free to clear it, because we're sending a signal now
+        _sleeping.store(false, std::memory_order_relaxed);
+        wakeup();
+    }
 }
 
 void
@@ -3351,6 +3491,7 @@ std::vector<reactor*> smp::_reactors;
 std::unique_ptr<smp_message_queue*[], smp::qs_deleter> smp::_qs;
 std::thread::id smp::_tmain;
 unsigned smp::count = 1;
+bool smp::poll_mode = false;
 bool smp::_using_dpdk;
 
 void smp::start_all_queues()

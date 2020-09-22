@@ -71,6 +71,11 @@ future<> output_stream<CharType>::write(scattered_message<CharType> msg) {
 }
 
 template<typename CharType>
+int output_stream<CharType>::get_fd() {
+    return _fd.get_fd();
+}
+
+template<typename CharType>
 future<>
 output_stream<CharType>::zero_copy_put(net::packet p) {
     // if flush is scheduled, disable it, so it will not try to write in parallel
@@ -120,11 +125,8 @@ future<> output_stream<CharType>::write(net::packet p) {
         }
 
         if (_zc_bufs.len() >= _size) {
-            if (_trim_to_size) {
-                return zero_copy_split_and_put(std::move(_zc_bufs));
-            } else {
-                return zero_copy_put(std::move(_zc_bufs));
-            }
+	    auto bufs = std::move(_zc_bufs);
+            return zero_copy_put(std::move(bufs));
         }
     }
     return make_ready_future<>();
@@ -397,9 +399,8 @@ output_stream<CharType>::flush() {
                 return _fd.flush();
             });
         } else if (_zc_bufs) {
-            return zero_copy_put(std::move(_zc_bufs)).then([this] {
-                return _fd.flush();
-            });
+	    auto bufs = std::move(_zc_bufs);
+            return zero_copy_put(std::move(bufs)).then([this] () mutable { return _fd.flush();});
         }
     } else {
         if (_ex) {
@@ -435,26 +436,42 @@ output_stream<CharType>::put(temporary_buffer<CharType> buf) {
 
 template <typename CharType>
 void
-output_stream<CharType>::poll_flush() {
+output_stream<CharType>::poll_flush(bool one_more_flush) {
     if (!_flush) {
         // flush was canceled, do nothing
         _flushing = false;
-        _in_batch.value().set_value();
-        _in_batch = compat::nullopt;
+	if (_in_batch) {
+            _in_batch.value().set_value();
+            _in_batch = std::experimental::nullopt;
+        }
         return;
     }
 
     auto f = make_ready_future();
     _flush = false;
-    _flushing = true; // make whoever wants to write into the fd to wait for flush to complete
+    // _flushing = true; // make whoever wants to write into the fd to wait for flush to complete
 
     if (_end) {
         // send whatever is in the buffer right now
         _buf.trim(_end);
         _end = 0;
-        f = _fd.put(std::move(_buf));
+	if (one_more_flush) {
+            _flushing = true;
+            f = _fd.put(std::move(_buf));
+        } else {
+            auto bufs = std::move(_buf);
+            _flushing = true;
+            f = _fd.put(std::move(bufs));
+        }
     } else if(_zc_bufs) {
-        f = _fd.put(std::move(_zc_bufs));
+	if (one_more_flush) {
+            _flushing = true;
+            f = _fd.put(std::move(_zc_bufs));
+        } else {
+            auto bufs = std::move(_zc_bufs);
+            _flushing = true;
+            f = _fd.put(std::move(bufs));
+        }
     }
 
     // FIXME: future is discarded
@@ -467,7 +484,7 @@ output_stream<CharType>::poll_flush() {
             _ex = std::current_exception();
         }
         // if flush() was called while flushing flush once more
-        poll_flush();
+        poll_flush(true);
     });
 }
 

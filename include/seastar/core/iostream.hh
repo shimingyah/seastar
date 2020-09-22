@@ -88,6 +88,10 @@ public:
         return make_ready_future<>();
     }
     virtual future<> close() = 0;
+    virtual int get_fd() {
+        // not implememted, reserve api
+        return -1;
+    }
 };
 
 class data_sink {
@@ -113,6 +117,7 @@ public:
         return _dsi->flush();
     }
     future<> close() { return _dsi->close(); }
+    int get_fd() { return _dsi->get_fd(); }
 };
 
 struct continue_consuming {};
@@ -293,7 +298,7 @@ private:
     size_t possibly_available() const { return _size - _begin; }
     future<> split_and_put(temporary_buffer<CharType> buf);
     future<> put(temporary_buffer<CharType> buf);
-    void poll_flush();
+    void poll_flush(bool one_more_flush= false);
     future<> zero_copy_put(net::packet p);
     future<> zero_copy_split_and_put(net::packet p);
     [[gnu::noinline]]
@@ -335,6 +340,7 @@ public:
     ///
     /// \returns the data_sink
     data_sink detach() &&;
+    int get_fd();
 private:
     friend class reactor;
 };

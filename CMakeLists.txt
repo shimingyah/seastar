@@ -461,6 +461,8 @@ add_library (seastar STATIC
   include/seastar/core/print.hh
   include/seastar/core/prometheus.hh
   include/seastar/core/queue.hh
+  include/seastar/core/channel.hh
+  include/seastar/core/packet_queue.hh
   include/seastar/core/ragel.hh
   include/seastar/core/reactor.hh
   include/seastar/core/report_exception.hh
@@ -595,6 +597,8 @@ add_library (seastar STATIC
   src/core/on_internal_error.cc
   src/core/posix.cc
   src/core/prometheus.cc
+  src/core/channel.cc
+  src/core/packet_queue.cc
   src/core/reactor.cc
   src/core/resource.cc
   src/core/sharded.cc
@@ -674,7 +678,7 @@ set (Seastar_PRIVATE_CXX_FLAGS
   -fvisibility=hidden
   -UNDEBUG
   -Wall
-  -Werror
+  # -Werror
   -Wno-array-bounds # Disabled because of https://gcc.gnu.org/bugzilla/show_bug.cgi?id=93437
   -Wno-error=deprecated-declarations)
 
@@ -901,6 +905,13 @@ if (ErrorUnused_FOUND)
       PUBLIC -Wno-error=unused-result)
   endif ()
 endif ()
+
+target_compile_definitions (seastar
+    PUBLIC
+      SEASTAR_NO_EXCEPTION_HACK
+      NO_EXCEPTION_INTERCEPT
+      SEASTAR_DEFAULT_ALLOCATOR
+      SEASTAR_HAVE_NUMA)
 
 if ((CMAKE_BUILD_TYPE STREQUAL "Debug") OR (CMAKE_BUILD_TYPE STREQUAL "Sanitize"))
   target_compile_definitions (seastar

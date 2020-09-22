@@ -44,6 +44,7 @@ class buffer_allocator;
 namespace net {
 
 class packet;
+class posix_data_sink_impl;
 
 }
 
@@ -72,6 +73,7 @@ public:
 
     friend class reactor;
     friend class pollable_fd;
+    friend class net::posix_data_sink_impl;
 
     future<size_t> read_some(char* buffer, size_t size);
     future<size_t> read_some(uint8_t* buffer, size_t size);
