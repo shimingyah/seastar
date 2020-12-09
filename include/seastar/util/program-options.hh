@@ -82,6 +82,8 @@ inline bool operator!=(const string_map& lhs, const string_map& rhs) {
 ///
 sstring get_or_default(const string_map&, const sstring& key, const sstring& def = sstring());
 
+std::vector<uint8_t> parse_string_comma(std::string str);
+
 std::istream& operator>>(std::istream& is, string_map&);
 std::ostream& operator<<(std::ostream& os, const string_map&);
 

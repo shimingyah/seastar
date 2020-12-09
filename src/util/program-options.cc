@@ -23,6 +23,13 @@
 #include <seastar/util/program-options.hh>
 
 #include <regex>
+#include <algorithm>
+
+#include <boost/lexical_cast.hpp>
+#include <boost/algorithm/string/replace.hpp>
+#include <boost/range/algorithm_ext/erase.hpp>
+#include <boost/algorithm/string.hpp>
+#include <boost/range/combine.hpp>
 
 namespace bpo = boost::program_options;
 
@@ -56,6 +63,18 @@ static void parse_map_associations(const std::string& v, string_map& ss) {
         auto v = p.substr(i + 1, p.size());
         ss[std::move(k)] = std::move(v);
     };
+}
+
+std::vector<uint8_t> parse_string_comma(std::string str) {
+    std::vector<uint8_t> uint8_vec = {};
+    std::vector<std::string> str_vec;
+    boost::split(str_vec, str, boost::is_any_of(","));
+    for (auto i : str_vec) {
+        boost::trim(i);
+        uint8_vec.push_back(boost::lexical_cast<uint8_t>(i));
+        sort(uint8_vec.begin(), uint8_vec.end());
+    }
+    return uint8_vec;
 }
 
 void validate(boost::any& out, const std::vector<std::string>& in, string_map*, int) {

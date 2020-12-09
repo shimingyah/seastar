@@ -39,6 +39,8 @@ namespace net {
     struct hw_config {
         std::string pci_address;
         compat::optional<unsigned> port_index;
+        compat::optional<int> bond_mode;
+        compat::optional<std::string> slave_ports_index;
         bool lro{ true };
         bool tso{ true };
         bool ufo{ true };
