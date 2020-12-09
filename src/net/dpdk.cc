@@ -118,7 +118,7 @@ namespace dpdk {
  * Test bond enabled
  */
 static inline bool bond_enabled(int bond_mode) {
-    if (bond_mode >= BONDING_MODE_ROUND_ROBIN && bond <= BONDING_MODE_ALB) {
+    if (bond_mode >= BONDING_MODE_ROUND_ROBIN && bond_mode <= BONDING_MODE_ALB) {
         return true;
     }
     return false;
@@ -443,7 +443,7 @@ public:
         , _slave_ports(slave_ports_index)
     {
         // first check if bond enabled and init bond params
-        if (bond_enabled(_bond)) {
+        if (bond_enabled(_bond_mode)) {
             int ret = init_bond_params();
             if (ret != 0) {
                 rte_exit(EXIT_FAILURE, "Cannot bond params conflict");

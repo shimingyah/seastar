@@ -66,20 +66,6 @@ void create_native_net_device(boost::program_options::variables_map opts) {
         net_config << fs.rdbuf();
     }
 
-    std::vector<uint8_t> slave_ports_index = {};
-#ifdef SEASTAR_HAVE_DPDK
-    if (opts.count("dpdk-pmd") && opts.count("slave-ports-index")) {
-        std::vector<std::string> ports_idx;
-        std::string ports_idx_str = opts["slave-ports-index"].as<std::string>();
-        boost::split(ports_idx, ports_idx_str, boost::is_any_of(","));
-        for (auto i : ports_idx) {
-            boost::trim(i);
-            slave_ports_index.push_back(boost::lexical_cast<uint8_t>(i));
-            sort(slave_ports_index.begin(), slave_ports_index.end());
-        }
-    }
-#endif
-
     std::unique_ptr<device> dev;
 
     if ( deprecated_config_used) {

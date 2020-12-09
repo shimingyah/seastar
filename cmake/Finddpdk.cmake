@@ -52,6 +52,8 @@ find_library (dpdk_TIMER_LIBRARY rte_timer)
 find_library (dpdk_PCI_LIBRARY rte_pci)
 find_library (dpdk_BUS_PCI_LIBRARY rte_bus_pci)
 find_library (dpdk_BUS_VDEV_LIBRARY rte_bus_vdev)
+find_library (dpdk_PMD_BOND_LIBRARY rte_pmd_bond)
+find_library (dpdk_FLOW_CLASSIFY_LIBRARY rte_flow_classify)
 
 include (FindPackageHandleStandardArgs)
 
@@ -82,7 +84,9 @@ set (dpdk_REQUIRED
   dpdk_TIMER_LIBRARY
   dpdk_PCI_LIBRARY
   dpdk_BUS_PCI_LIBRARY
-  dpdk_BUS_VDEV_LIBRARY)
+  dpdk_BUS_VDEV_LIBRARY
+  dpdk_PMD_BOND_LIBRARY
+  dpdk_FLOW_CLASSIFY_LIBRARY)
 
 # fm10k, sfc_efx driver can only build on x86
 if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
@@ -117,7 +121,9 @@ if (dpdk_FOUND AND NOT (TARGET dpdk::dpdk))
     ${dpdk_PMD_IXGBE_LIBRARY}
     ${dpdk_PMD_NFP_LIBRARY}
     ${dpdk_PMD_RING_LIBRARY}
-    ${dpdk_PMD_VMXNET3_UIO_LIBRARY})
+    ${dpdk_PMD_VMXNET3_UIO_LIBRARY}
+    ${dpdk_PMD_BOND_LIBRARY}
+    ${dpdk_FLOW_CLASSIFY_LIBRARY})
 
   if (CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
     set (dpdk_LIBRARIES
@@ -444,6 +450,28 @@ if (dpdk_FOUND AND NOT (TARGET dpdk::dpdk))
   set_target_properties (dpdk::bus_vdev
     PROPERTIES
       IMPORTED_LOCATION ${dpdk_BUS_VDEV_LIBRARY}
+      INTERFACE_INCLUDE_DIRECTORIES ${dpdk_INCLUDE_DIR})
+
+  #
+  # pmd_bond
+  #
+
+  add_library (dpdk::pmd_bond UNKNOWN IMPORTED)
+
+  set_target_properties (dpdk::pmd_bond
+    PROPERTIES
+      IMPORTED_LOCATION ${dpdk_PMD_BOND_LIBRARY}
+      INTERFACE_INCLUDE_DIRECTORIES ${dpdk_INCLUDE_DIR})
+
+  #
+  # flow_classify
+  #
+
+  add_library (dpdk::flow_classify UNKNOWN IMPORTED)
+
+  set_target_properties (dpdk::flow_classify
+    PROPERTIES
+      IMPORTED_LOCATION ${dpdk_FLOW_CLASSIFY_LIBRARY}
       INTERFACE_INCLUDE_DIRECTORIES ${dpdk_INCLUDE_DIR})
 
   #

@@ -2034,8 +2034,8 @@ future<> reactor::flush_packet_queue(bool& pollable) {
     pollable = true;
     output_stream<char>* out = chan->get_output_stream();
 	
-    return out->write(std::move(item->_buf)).then([this, out]() {
-                return out->flush().then([] {
+    return out->write(std::move(item->_buf)).then([this, item, out]() {
+                return out->flush().then([this, item] {
                     item->_done();
                     delete item;
                     return seastar::make_ready_future<>();
