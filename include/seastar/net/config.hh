@@ -47,6 +47,7 @@ namespace net {
         bool hw_fc{ true };
         bool event_index{ true };
         bool csum_offload{ true };
+        bool flow_classify{ false };
         compat::optional<unsigned> ring_size;
     };
 

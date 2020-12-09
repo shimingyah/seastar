@@ -67,7 +67,10 @@ static void parse_map_associations(const std::string& v, string_map& ss) {
 
 std::vector<uint8_t> parse_string_comma(std::string str) {
     std::vector<uint8_t> uint8_vec = {};
-    std::vector<std::string> str_vec;
+    std::vector<std::string> str_vec = {};
+    if (str.empty()) {
+        return uint8_vec;
+    }
     boost::split(str_vec, str, boost::is_any_of(","));
     for (auto i : str_vec) {
         boost::trim(i);

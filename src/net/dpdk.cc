@@ -352,6 +352,7 @@ class dpdk_device : public device {
     unsigned _home_cpu;
     bool _use_lro;
     bool _enable_fc;
+    bool _use_flow_classify;
     int _bond_mode;
     std::vector<uint8_t> _redir_table;
     rss_key_type _rss_key;
@@ -430,7 +431,7 @@ public:
      *       6: BONDING_MODE_ALB
      */
     dpdk_device(uint16_t port_idx, uint16_t num_queues, bool use_lro,
-                bool enable_fc, int bond_mode, std::vector<uint8_t> slave_ports_index)
+                bool enable_fc, bool use_flow_classify, int bond_mode, std::vector<uint8_t> slave_ports_index)
         : _port_idx(port_idx)
         , _num_queues(num_queues)
         , _home_cpu(this_shard_id())
@@ -439,6 +440,7 @@ public:
         , _stats_plugin_name("network")
         , _stats_plugin_inst(std::string("port") + std::to_string(_port_idx))
         , _xstats(port_idx)
+        , _use_flow_classify(use_flow_classify)
         , _bond_mode(bond_mode)
         , _slave_ports(slave_ports_index)
     {
@@ -1843,28 +1845,32 @@ void dpdk_device::init_port_fini()
         _stats.tx.bad.total       = rte_stats.oerrors;
     });
 
-    // TODO: replace deprecated filter api with generic flow api
-    #pragma GCC diagnostic push
-    #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-    if (_num_queues > 1) {
-        if (!rte_eth_dev_filter_supported(_port_idx, RTE_ETH_FILTER_HASH)) {
-            printf("Port %d: HASH FILTER configuration is supported\n", _port_idx);
+    if (_use_flow_classify) {
 
-            // Setup HW touse the TOEPLITZ hash function as an RSS hash function
-            struct rte_eth_hash_filter_info info = {};
+    } else {
+        // TODO: replace deprecated filter api with generic flow api
+        #pragma GCC diagnostic push
+        #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+        if (_num_queues > 1) {
+            if (!rte_eth_dev_filter_supported(_port_idx, RTE_ETH_FILTER_HASH)) {
+                printf("Port %d: HASH FILTER configuration is supported\n", _port_idx);
 
-            info.info_type = RTE_ETH_HASH_FILTER_GLOBAL_CONFIG;
-            info.info.global_conf.hash_func = RTE_ETH_HASH_FUNCTION_TOEPLITZ;
+                // Setup HW touse the TOEPLITZ hash function as an RSS hash function
+                struct rte_eth_hash_filter_info info = {};
 
-            if (rte_eth_dev_filter_ctrl(_port_idx, RTE_ETH_FILTER_HASH,
-                                        RTE_ETH_FILTER_SET, &info) < 0) {
-                rte_exit(EXIT_FAILURE, "Cannot set hash function on a port %d\n", _port_idx);
+                info.info_type = RTE_ETH_HASH_FILTER_GLOBAL_CONFIG;
+                info.info.global_conf.hash_func = RTE_ETH_HASH_FUNCTION_TOEPLITZ;
+
+                if (rte_eth_dev_filter_ctrl(_port_idx, RTE_ETH_FILTER_HASH,
+                                            RTE_ETH_FILTER_SET, &info) < 0) {
+                    rte_exit(EXIT_FAILURE, "Cannot set hash function on a port %d\n", _port_idx);
+                }
             }
-        }
 
-        set_rss_table();
+            set_rss_table();
+        }
+        #pragma GCC diagnostic pop
     }
-    #pragma GCC diagnostic pop
 
     // Wait for a link
     check_port_link_status();
@@ -2426,6 +2432,7 @@ std::unique_ptr<net::device> create_dpdk_net_device(
                                     uint16_t num_queues,
                                     bool use_lro,
                                     bool enable_fc,
+                                    bool use_flow_classify,
                                     int bond_mode,
                                     std::vector<uint8_t> slave_ports_index)
 {
@@ -2443,15 +2450,16 @@ std::unique_ptr<net::device> create_dpdk_net_device(
         printf("ports number: %d\n", rte_eth_dev_count_avail());
     }
 
-    return std::make_unique<dpdk::dpdk_device>(port_idx, num_queues, use_lro,
-                                               enable_fc, bond_mode, slave_ports_index);
+    return std::make_unique<dpdk::dpdk_device>(port_idx, num_queues, use_lro, enable_fc, 
+                                               use_flow_classify, bond_mode, slave_ports_index);
 }
 
 std::unique_ptr<net::device> create_dpdk_net_device(
                                     const hw_config& hw_cfg)
 {
     return create_dpdk_net_device(*hw_cfg.port_index, smp::count, hw_cfg.lro, hw_cfg.hw_fc, 
-                                  *hw_cfg.bond_mode, seastar::program_options::parse_string_comma(*hw_cfg.slave_ports_index));
+                                  hw_cfg.flow_classify, *hw_cfg.bond_mode, 
+                                  seastar::program_options::parse_string_comma(*hw_cfg.slave_ports_index));
 }
 
 
@@ -2471,14 +2479,21 @@ get_dpdk_net_options_description()
                 boost::program_options::value<std::string>()->default_value("on"),
                 "Enable HW Flow Control (on / off)");
 
+    opts.add_options()
+        ("flow-classify",
+                boost::program_options::value<bool>()->default_value(false),
+                "Use flow classify, if Mallanox NIC, it should be ture; if Intel NIC, it should be false");
+
     opts.add_options() 
         ("bond-mode", 
                 boost::program_options::value<int>()->default_value(-1),
                 "Enable bond mode , 0-6 is effective. -1 is no-bond. 0-BONDING_MODE_ROUND_ROBIN, 1-BONDING_MODE_ACTIVE_BACKUP, 2-BONDING_MODE_BALANCE, 3-BONDING_MODE_BROADCAST, 4-BONDING_MODE_8023AD, 5-BONDING_MODE_TLB, 6-BONDING_MODE_ALB");
+
     opts.add_options()
         ("slave-ports-index",
                 boost::program_options::value<std::string>()->default_value(""),
                 "Slave ports index under bond mode split by comma, for example 0,1. if slave-ports-index is empty all ports are slave. If dpdk-port-index is excluded in slave-port-index , dpdk-port-index is invalid");
+
 #if 0
     opts.add_options()
         ("csum-offload",
