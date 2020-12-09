@@ -1412,6 +1412,10 @@ void pollable_fd_state::forget() {
 }
 
 void intrusive_ptr_release(pollable_fd_state* fd) {
+    // sometimes local_engine is nullptr
+    if (local_engine == nullptr) {
+        return;
+    }
     if (!--fd->_refs) {
         fd->forget();
     }
@@ -2030,16 +2034,10 @@ future<> reactor::flush_packet_queue(bool& pollable) {
     pollable = true;
     output_stream<char>* out = chan->get_output_stream();
 	
-    /*
-    return out->write(net::packet(item->_fragments,
-                                  make_deleter(seastar::deleter(), [item](){
-                                      item->_done();
-                                      delete item;
-                                  })
-            )).then([this, out]() {
-    */
     return out->write(std::move(item->_buf)).then([this, out]() {
                 return out->flush().then([] {
+                    item->_done();
+                    delete item;
                     return seastar::make_ready_future<>();
                 });
             }).then_wrapped([this, out, chan] (auto&& f) {
@@ -2069,7 +2067,6 @@ future<> reactor::flush_packet_queue(bool& pollable) {
 }
 
 void reactor::stop() {
-    assert(_id == 0);
     smp::cleanup_cpu();
     if (!_stopping) {
         // Run exit tasks locally and then stop all other engines
