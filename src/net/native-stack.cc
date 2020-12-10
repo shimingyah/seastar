@@ -74,7 +74,7 @@ void create_native_net_device(boost::program_options::variables_map opts) {
              dev = create_dpdk_net_device(opts["dpdk-port-index"].as<unsigned>(), smp::count,
                 !(opts.count("lro") && opts["lro"].as<std::string>() == "off"),
                 !(opts.count("hw-fc") && opts["hw-fc"].as<std::string>() == "off"),
-                opts["bond-mode"].as<int>(),
+                opts["flow-classify"].as<bool>(), opts["bond-mode"].as<int>(),
                 program_options::parse_string_comma(opts["slave-ports-index"].as<std::string>()));   
        } else 
 #endif  

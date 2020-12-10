@@ -35,6 +35,7 @@ std::unique_ptr<net::device> create_dpdk_net_device(
                                     uint16_t num_queues = 1,
                                     bool use_lro = true,
                                     bool enable_fc = true,
+                                    bool use_flow_classify = false,
                                     int bond_mode = -1,
                                     std::vector<uint8_t> slave_ports_index = {});
 

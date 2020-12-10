@@ -124,6 +124,199 @@ static inline bool bond_enabled(int bond_mode) {
     return false;
 }
 
+// flow classify used by generic flow api
+/*
+{
+// print a message out of a flow error
+static int port_flow_complain(struct rte_flow_error *error)
+{
+    static const char *const errstrlist[] = {
+        [RTE_FLOW_ERROR_TYPE_NONE] = "no error",
+        [RTE_FLOW_ERROR_TYPE_UNSPECIFIED] = "cause unspecified",
+        [RTE_FLOW_ERROR_TYPE_HANDLE] = "flow rule (handle)",
+        [RTE_FLOW_ERROR_TYPE_ATTR_GROUP] = "group field",
+        [RTE_FLOW_ERROR_TYPE_ATTR_PRIORITY] = "priority field",
+        [RTE_FLOW_ERROR_TYPE_ATTR_INGRESS] = "ingress field",
+        [RTE_FLOW_ERROR_TYPE_ATTR_EGRESS] = "egress field",
+        [RTE_FLOW_ERROR_TYPE_ATTR_TRANSFER] = "transfer field",
+        [RTE_FLOW_ERROR_TYPE_ATTR] = "attributes structure",
+        [RTE_FLOW_ERROR_TYPE_ITEM_NUM] = "pattern length",
+        [RTE_FLOW_ERROR_TYPE_ITEM_SPEC] = "item specification",
+        [RTE_FLOW_ERROR_TYPE_ITEM_LAST] = "item specification range",
+        [RTE_FLOW_ERROR_TYPE_ITEM_MASK] = "item specification mask",
+        [RTE_FLOW_ERROR_TYPE_ITEM] = "specific pattern item",
+        [RTE_FLOW_ERROR_TYPE_ACTION_NUM] = "number of actions",
+        [RTE_FLOW_ERROR_TYPE_ACTION_CONF] = "action configuration",
+        [RTE_FLOW_ERROR_TYPE_ACTION] = "specific action",
+    };
+    const char *errstr;
+    char buf[32];
+    int err = rte_errno;
+
+    if ((unsigned int)error->type >= RTE_DIM(errstrlist) ||
+        !errstrlist[error->type])
+        errstr = "unknown type";
+    else
+        errstr = errstrlist[error->type];
+        printf("Caught error type %d (%s): %s%s: %s\n",
+           error->type, errstr,
+           error->cause ? (snprintf(buf, sizeof(buf), "cause: %p, ",
+                                    error->cause), buf) : "",
+           error->message ? error->message : "(no stated reason)",
+           rte_strerror(err));
+    return -err;
+}
+
+static int port_flow_isolate(uint16_t port_id, int set)
+{
+    struct rte_flow_error error;
+    // poisoning to make sure PMDs update it in case of error.
+    memset(&error, 0x66, sizeof(error));
+    if (rte_flow_isolate(port_id, set, &error))
+        return port_flow_complain(&error);
+    printf("Ingress traffic on port %u is %s to the defined flow rules\n",
+           port_id,
+           set ? "now restricted" : "not restricted anymore");
+    return 0;
+}
+
+static int create_tcp_flow(uint16_t port_id, int nb_queues, uint16_t tcp_port) {
+    struct rte_flow_attr attr = {.ingress = 1};
+    uint16_t queue[RTE_MAX_QUEUES_PER_PORT];
+    for (int i = 0, j = 0; i < nb_queues; ++i)
+        queue[j++] = i;
+
+    uint8_t rss_key[40] = {
+        0xd1, 0x81, 0xc6, 0x2c, 0xf7, 0xf4, 0xdb, 0x5b,
+        0x19, 0x83, 0xa2, 0xfc, 0x94, 0x3e, 0x1a, 0xdb,
+        0xd9, 0x38, 0x9e, 0x6b, 0xd1, 0x03, 0x9c, 0x2c,
+        0xa7, 0x44, 0x99, 0xad, 0x59, 0x3d, 0x56, 0xd9,
+        0xf3, 0x25, 0x3c, 0x06, 0x2a, 0xdc, 0x1f, 0xfc
+    };
+    struct rte_flow_action_rss rss = {
+        .types = ETH_RSS_NONFRAG_IPV4_TCP,
+        .key_len = 40,
+        .key = rss_key,
+        .queue_num = j,
+        .queue = queue,
+    };
+
+    struct rte_flow_item pattern[3];
+    struct rte_flow_action action[2];
+    struct rte_flow_item_tcp tcp_spec;
+    struct rte_flow_item_tcp tcp_mask = {
+        .hdr = {
+            .src_port = RTE_BE16(0x0000),
+            .dst_port = RTE_BE16(0xffff),
+        },
+    };
+    struct rte_flow_error error;
+
+    memset(pattern, 0, sizeof(pattern));
+    memset(action, 0, sizeof(action));
+    memset(&tcp_spec, 0, sizeof(struct rte_flow_item_tcp));
+
+    // set the dst ipv4 packet to the required value
+    tcp_spec.hdr.dst_port = rte_cpu_to_be_16(tcp_port);
+    pattern[0].type = RTE_FLOW_ITEM_TYPE_IPV4;
+    pattern[1].type = RTE_FLOW_ITEM_TYPE_TCP;
+    pattern[1].spec = &tcp_spec;
+    pattern[1].mask = &tcp_mask;
+
+    // end the pattern array
+    pattern[2].type = RTE_FLOW_ITEM_TYPE_END;
+
+    // create the action
+    action[0].type = RTE_FLOW_ACTION_TYPE_RSS;
+    action[0].conf = &rss;
+    action[1].type = RTE_FLOW_ACTION_TYPE_END;
+
+    struct rte_flow *flow;
+    // validate and create the flow rule
+    if (!rte_flow_validate(port_id, &attr, pattern, action, &error)) {
+        flow = rte_flow_create(port_id, &attr, pattern, action, &error);
+        if (!flow) {
+            return port_flow_complain(&error);
+        }
+    }
+
+    memset(pattern, 0, sizeof(pattern));
+
+    // set the dst ipv4 packet to the required value
+    pattern[0].type = RTE_FLOW_ITEM_TYPE_IPV4;
+
+    struct rte_flow_item_tcp tcp_src_mask = {
+        .hdr = {
+            .src_port = RTE_BE16(0xffff),
+            .dst_port = RTE_BE16(0x0000),
+        },
+    };
+
+    memset(&tcp_spec, 0, sizeof(struct rte_flow_item_tcp));
+    tcp_spec.hdr.src_port = rte_cpu_to_be_16(tcp_port);
+    pattern[1].type = RTE_FLOW_ITEM_TYPE_TCP;
+    pattern[1].spec = &tcp_spec;
+    pattern[1].mask = &tcp_src_mask;
+
+    // end the pattern array
+    pattern[2].type = RTE_FLOW_ITEM_TYPE_END;
+
+    // validate and create the flow rule
+    if (!rte_flow_validate(port_id, &attr, pattern, action, &error)) {
+        flow = rte_flow_create(port_id, &attr, pattern, action, &error);
+        if (!flow) {
+            return port_flow_complain(&error);
+        }
+    }
+
+    return 1;
+}
+
+static int init_flow_classify(uint16_t port_id, int nb_queues, std::vector<uint16_t> tcp_ports) {    
+    // create tcp flow rule
+    for (int i = 0; i < tcp_ports.size(); i++) {
+        if(!create_tcp_flow(port_id, nb_queues, tcp_ports[i])) {
+            return -1;
+        }
+    }
+
+    // create arp flow rule
+    struct rte_flow_attr attr = {.ingress = 1};
+    struct rte_flow_action_queue queue = {.index = 0};
+    struct rte_flow_item pattern_[2];
+    struct rte_flow_action action[2];
+    struct rte_flow_item_eth eth_type = {.type = RTE_BE16(0x0806)};
+    struct rte_flow_item_eth eth_mask = {
+        .type = RTE_BE16(0xffff)
+    };
+
+    memset(pattern_, 0, sizeof(pattern_));
+    memset(action, 0, sizeof(actin));
+    pattern_[0].type = RTE_FLOW_ITEM_TYPE_ETH;
+    pattern_[0].spec = &eth_type;
+    pattern_[0].mask = &eth_mask;
+    pattern_[1].type = RTE_FLOW_ITEM_TYPEEND;
+
+    // create the action
+    action[0].type = RTE_FLOW_ACTION_TYPE_QUEUE;
+    action[0].conf = &queue;
+    action[1].type = RTE_FLOW_ACTION_TYPEEND;
+
+    struct rte_flow *flow;
+    struct rte_flow_error error;
+    // validate and create the flow rule
+    if (!rte_flow_validate(port_id, &attr, pattern_, action, &error)) {
+        flow = rte_flow_create(port_id, &attr, pattern_, action, &error);
+        if (!flow) {
+            return port_flow_complain(&error);
+        }
+    }
+    return 1;
+}
+
+}
+*/
+
 /******************* Net device related constatns *****************************/
 static constexpr uint16_t default_ring_size      = 512;
 
