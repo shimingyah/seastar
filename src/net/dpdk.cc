@@ -1889,6 +1889,8 @@ int dpdk_device::init_port_start()
     printf("Port %u init ... ", _port_idx);
     fflush(stdout);
 
+    // TODO if use bond mode, maybe can't set port_conf.rxmode.offloads and port_conf.txmode.offloads?
+    // and in my test only bond mode 2 can work, please help me fix it.
     if (bond_enabled(_bond_mode)) {
         /* 
          * bond mode require slave port_conf are equal
@@ -1917,7 +1919,7 @@ int dpdk_device::init_port_start()
         }
 
         // if success, return bond port idx
-        retval = rte_eth_bond_create("bond0", _bond_mode, 0 /*SOCKET_ID_ANY*/);   
+        retval = rte_eth_bond_create("net_bonding0", _bond_mode, 0 /*SOCKET_ID_ANY*/);
         if (retval < 0) {
             rte_exit(EXIT_FAILURE, "Faled to create bond port\n");
         }
