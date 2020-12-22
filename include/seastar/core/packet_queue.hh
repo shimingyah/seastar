@@ -18,10 +18,24 @@ class reactor;
 class channel;
 
 struct user_packet {
-  // std::vector<net::fragment> _fragments;
-  temporary_buffer<char> _buf;
+  int _size;
+  void *_args;
+  void *_time_stat;
+  void *_libeasy_pool;
+  channel *_channel;
+  std::vector<net::fragment> _fragments;
+  std::function<void()> _out_queue;
   std::function<void()> _done;
-  channel* _channel;
+
+  user_packet() {
+    _size = 0;
+    _args = nullptr;
+    _time_stat = nullptr;
+    _libeasy_pool = nullptr;
+    _channel = nullptr;
+    _out_queue = [] {};
+    _done = [] {};
+  }
 };
 
 using tls_queue = boost::lockfree::queue<user_packet*>;

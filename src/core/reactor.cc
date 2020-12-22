@@ -2027,17 +2027,22 @@ future<> reactor::flush_packet_queue(bool& pollable) {
 
     user_packet* item = nullptr;
     if (!_packet_queue->dequeue_bulk(&item)) {
-        return make_ready_future();
+        return seastar::make_ready_future();
     }
     channel* chan = item->_channel;
 
     pollable = true;
     output_stream<char>* out = chan->get_output_stream();
+
+    item->_out_queue();
 	
-    return out->write(std::move(item->_buf)).then([this, item, out]() {
-                return out->flush().then([this, item] {
-                    item->_done();
-                    delete item;
+    return out->write(net::packet(item->_fragments,
+                                      make_deleter(seastar::deleter(), [item](){
+                                        item->_done();
+                                        delete item;
+                                      })
+              )).then([this, out]() {
+                return out->flush().then([] {
                     return seastar::make_ready_future<>();
                 });
             }).then_wrapped([this, out, chan] (auto&& f) {
@@ -2054,14 +2059,16 @@ future<> reactor::flush_packet_queue(bool& pollable) {
                     // in kernel versions before 2.6.9, the EPOLL_CTL_DEL operation required
                     // a non-null pointer in event, even though this argument is ignored.
                     // so we use a empty param here.
+                    /*
                     struct epoll_event ev_del;
                     if (epoll_ctl(_backend->get_fd(), EPOLL_CTL_DEL, out->get_fd(), &ev_del) < 0) {
                         seastar_logger.error("Epoll delete fd error.");
                         return make_ready_future();
                     }
                     close(out->get_fd());
+                    */
 
-                    return make_ready_future();
+                    return seastar::make_ready_future();
                 }
           });
 }
