@@ -1408,6 +1408,11 @@ void pollable_fd_state::forget() {
 }
 
 void intrusive_ptr_release(pollable_fd_state* fd) {
+    // local_engine maybe nullptr
+    if (local_engine == nullptr) {
+        seastar_logger.error("intrusive_ptr_release local_engine is nullptr, just return");
+        return;
+    }
     if (!--fd->_refs) {
         fd->forget();
     }
@@ -2015,7 +2020,7 @@ future<> reactor::run_exit_tasks() {
 }
 
 void reactor::stop() {
-    assert(_id == 0);
+    // assert(_id == 0);
     smp::cleanup_cpu();
     if (!_stopping) {
         // Run exit tasks locally and then stop all other engines

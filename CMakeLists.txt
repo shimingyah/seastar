@@ -674,7 +674,7 @@ set (Seastar_PRIVATE_CXX_FLAGS
   -fvisibility=hidden
   -UNDEBUG
   -Wall
-  -Werror
+  # -Werror
   -Wno-array-bounds # Disabled because of https://gcc.gnu.org/bugzilla/show_bug.cgi?id=93437
   -Wno-error=deprecated-declarations)
 
@@ -901,6 +901,13 @@ if (ErrorUnused_FOUND)
       PUBLIC -Wno-error=unused-result)
   endif ()
 endif ()
+
+target_compile_definitions (seastar
+    PUBLIC
+      SEASTAR_NO_EXCEPTION_HACK
+      NO_EXCEPTION_INTERCEPT
+      SEASTAR_DEFAULT_ALLOCATOR
+      SEASTAR_HAVE_NUMA)
 
 if ((CMAKE_BUILD_TYPE STREQUAL "Debug") OR (CMAKE_BUILD_TYPE STREQUAL "Sanitize"))
   target_compile_definitions (seastar

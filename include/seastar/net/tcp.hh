@@ -723,6 +723,7 @@ public:
         }
         ~listener() {
             if (_port) {
+                // will crash in dpdk mode
                 _tcp._listening.erase(_port);
             }
         }
